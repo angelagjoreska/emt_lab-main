@@ -1,5 +1,6 @@
 package mk.finki.ukim.wp.libraryapi.service.application.impl;
 
+import mk.finki.ukim.wp.libraryapi.model.domain.ActivityLog;
 import mk.finki.ukim.wp.libraryapi.model.domain.Author;
 import mk.finki.ukim.wp.libraryapi.model.domain.Book;
 import mk.finki.ukim.wp.libraryapi.model.dto.DisplayBookDto;
@@ -8,6 +9,7 @@ import mk.finki.ukim.wp.libraryapi.model.enums.BookState;
 import mk.finki.ukim.wp.libraryapi.model.events.BookRentedEvent;
 import mk.finki.ukim.wp.libraryapi.model.projection.BookDetailsProjection;
 import mk.finki.ukim.wp.libraryapi.model.projection.BookShortProjection;
+import mk.finki.ukim.wp.libraryapi.repository.ActivityLogRepository;
 import mk.finki.ukim.wp.libraryapi.repository.AuthorRepository;
 import mk.finki.ukim.wp.libraryapi.repository.BookRepository;
 import mk.finki.ukim.wp.libraryapi.service.application.BookService;
@@ -16,7 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.*;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,38 +26,36 @@ import java.util.Optional;
 public class BookServiceImpl implements BookService {
 
     private final ApplicationEventPublisher eventPublisher;
-
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
+    private final ActivityLogRepository activityLogRepository;
 
-    public BookServiceImpl(BookRepository bookRepository, AuthorRepository authorRepository, ApplicationEventPublisher eventPublisher) {
+    public BookServiceImpl(BookRepository bookRepository,
+                           AuthorRepository authorRepository,
+                           ApplicationEventPublisher eventPublisher,
+                           ActivityLogRepository activityLogRepository) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
         this.eventPublisher = eventPublisher;
+        this.activityLogRepository = activityLogRepository;
     }
 
     @Override
     public Book create(String name, BookCategory category, Long authorId, Integer availableCopies) {
         Author author = authorRepository.findById(authorId)
-                .orElseThrow(() -> new RuntimeException("Author not found with id: " + authorId));
+                .orElseThrow(() -> new IllegalArgumentException("Author not found"));
 
-        Book book = new Book();
-        book.setTitle(name);
-        book.setCategory(category);
-        book.setAuthor(author);
-        book.setAvailableCopies(availableCopies);
-        book.setState(BookState.GOOD);
-
+        Book book = new Book(name, category, author, availableCopies);
         return bookRepository.save(book);
     }
 
     @Override
     public Book update(Long id, String name, BookCategory category, Long authorId, Integer availableCopies) {
         Book book = bookRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Book not found with id: " + id));
+                .orElseThrow(() -> new IllegalArgumentException("Book not found"));
 
         Author author = authorRepository.findById(authorId)
-                .orElseThrow(() -> new RuntimeException("Author not found with id: " + authorId));
+                .orElseThrow(() -> new IllegalArgumentException("Author not found"));
 
         book.setTitle(name);
         book.setCategory(category);
@@ -71,25 +70,24 @@ public class BookServiceImpl implements BookService {
         bookRepository.deleteById(id);
     }
 
-
+    @Override
+    @Transactional
     public Book markAsRented(Long id) {
-        Book book = bookRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Book not found"));
+        return bookRepository.findById(id)
+                .map(book -> {
+                    if (book.getAvailableCopies() <= 0) {
+                        throw new IllegalStateException("No available copies");
+                    }
+                    book.setAvailableCopies(book.getAvailableCopies() - 1);
+                    Book savedBook = bookRepository.save(book);
 
-        if (book.getAvailableCopies() > 0) {
-            book.setAvailableCopies(book.getAvailableCopies() - 1);
-            book = bookRepository.save(book);
+                    activityLogRepository.save(new ActivityLog(savedBook.getTitle(), "RENT"));
+                    eventPublisher.publishEvent(new BookRentedEvent(this, savedBook));
 
-
-            eventPublisher.publishEvent(new BookRentedEvent(this, book));
-
-            return book;
-        } else {
-            throw new IllegalStateException("No available copies");
-        }
+                    return savedBook;
+                })
+                .orElseThrow(() -> new IllegalArgumentException("Book not found with id: " + id));
     }
-
-
 
     @Override
     public List<Book> findAll() {
@@ -111,59 +109,36 @@ public class BookServiceImpl implements BookService {
         return bookRepository.findByState(state);
     }
 
-
-
+    @Override
     public List<Book> findBooksBetweenIds(Long a, Long b) {
         return bookRepository.findAllByIdBetween(a, b);
     }
 
-
-
     @Override
-    public Page<DisplayBookDto> findAllWithFilters(
-            BookCategory category,
-            BookState state,
-            Long authorId,
-            Boolean available,
-            int page,
-            int size,
-            String sortBy
-    ) {
-
-        Pageable pageable = PageRequest.of(page, size, Sort.by(sortBy));
-
-        Page<Book> result;
-
-        if (category != null) {
-            result = bookRepository.findByCategory(category, pageable);
-        } else if (state != null) {
-            result = bookRepository.findByState(state, pageable);
-        } else if (authorId != null) {
-            result = bookRepository.findByAuthor_Id(authorId, pageable);
-        } else if (available != null && available) {
-            result = bookRepository.findByAvailableCopiesGreaterThan(0, pageable);
-        } else {
-            result = bookRepository.findAll(pageable);
-        }
-
-        return result.map(DisplayBookDto::from);
+    public List<Book> getMostPopularBooks(int limit) {
+        return activityLogRepository.findMostPopularBooks(PageRequest.of(0, limit));
     }
 
+    @Override
+    public List<Author> getMostPopularAuthors(int limit) {
+        return activityLogRepository.findMostPopularAuthors(PageRequest.of(0, limit));
+    }
+
+    @Override
+    public Page<DisplayBookDto> findAllWithFilters(BookCategory category, BookState state, Long authorId, Boolean available, int page, int size, String sortBy) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sortBy));
+
+        Page<Book> booksPage = bookRepository.findAll(pageable);
+        return booksPage.map(DisplayBookDto::from);
+    }
 
     @Override
     public List<BookShortProjection> findAllShort() {
-        // Овде го повикуваш методот што го напишавме во BookRepository
         return bookRepository.findAllProjectedBy();
     }
 
     @Override
     public List<BookDetailsProjection> findAllDetails() {
-        // Овде го повикуваш вториот метод од BookRepository
         return bookRepository.findAllDetailsProjectedBy();
     }
-
-
-
-
-
 }

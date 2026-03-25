@@ -56,6 +56,6 @@ public class Book {
         this.category = category;
         this.author = author;
         this.availableCopies = availableCopies;
-        this.state = BookState.GOOD; // default state
+        this.state = BookState.GOOD;
     }
 }

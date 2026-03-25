@@ -39,17 +39,15 @@ public interface BookRepository extends JpaRepository<Book, Long>, JpaSpecificat
 
     List<BookShortProjection> findAllProjectedBy();
 
-    // Овој метод ќе го користиш за ендпоинтот со проширен приказ
     List<BookDetailsProjection> findAllDetailsProjectedBy();
 
-    // Дополнително: Ако сакаш пагинација и со проекција
+    // paginacija so proekcija
     Page<BookShortProjection> findProjectedBy(Pageable pageable);
 
     @EntityGraph(attributePaths = {"author", "author.country"})
     @Override
     Page<Book> findAll(Specification<Book> spec, Pageable pageable);
 
-    // Можеш да го додадеш и на специфичен метод за детален приказ
     @EntityGraph(attributePaths = {"author", "author.country"})
     Optional<Book> findById(Long id);
 

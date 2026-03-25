@@ -43,7 +43,7 @@ public class BookController {
         this.activityLogRepository = activityLogRepository;
     }
 
-    // 1. СТАТИЧНИ ПАТЕКИ И ФИЛТРИ (Одат најгоре)
+    // --- 1. СТАТИЧНИ ПАТЕКИ (ОДАТ НАЈГОРЕ) ---
 
     @GetMapping("/filter")
     public Page<DisplayBookDto> findAllWithFilters(
@@ -53,9 +53,23 @@ public class BookController {
             @RequestParam(required = false) Boolean available,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "5") int size,
-            @RequestParam(defaultValue = "title") String sortBy // ОВА СМЕНИ ГО ВО 'title'
+            @RequestParam(defaultValue = "title") String sortBy
     ) {
         return bookService.findAllWithFilters(category, state, authorId, available, page, size, sortBy);
+    }
+
+
+    @GetMapping("/popular/books")
+    public List<DisplayBookDto> getPopularBooks(@RequestParam(defaultValue = "5") int limit) {
+        Pageable topLimit = PageRequest.of(0, limit);
+        List<Book> books = activityLogRepository.findMostPopularBooks(topLimit);
+        return DisplayBookDto.from(books);
+    }
+
+    @GetMapping("/popular/authors")
+    public List<Author> getPopularAuthors(@RequestParam(defaultValue = "5") int limit) {
+        Pageable topLimit = PageRequest.of(0, limit);
+        return activityLogRepository.findMostPopularAuthors(topLimit);
     }
 
     @GetMapping("/projection/short")
@@ -97,7 +111,7 @@ public class BookController {
         return outOfStockRepository.findAll();
     }
 
-    // 2. ЕНДПОИНТИ СО ПРОМЕНЛИВИ {id} (Одат подолу)
+    // --- 2. ЕНДПОИНТИ СО ПРОМЕНЛИВИ {id} (ОДАТ ПОДОЛУ) ---
 
     @GetMapping("/{id}")
     public DisplayBookDto findById(@PathVariable Long id) {
@@ -130,9 +144,7 @@ public class BookController {
         return ResponseEntity.ok().build();
     }
 
-    // 3. ОСТАНАТО
-
-    @GetMapping("/all-list") // Го преименував за да не се меша со пагинацијата
+    @GetMapping("/all-list")
     public List<DisplayBookDto> findAllList() {
         return DisplayBookDto.from(bookService.findAll());
     }
